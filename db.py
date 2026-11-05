@@ -2,6 +2,7 @@
 import hashlib
 import hmac
 import os
+import re
 
 import mysql.connector
 import streamlit as st
@@ -20,6 +21,7 @@ def get_connection():
         user=cfg["user"],
         password=cfg["password"],
         database=cfg["database"],
+        use_pure=True,  # pure-Python driver still supports TiDB's mysql_native_password login
     )
     if cfg.get("ssl_ca"):  # cloud databases need an encrypted (TLS) connection
         options.update(ssl_ca=cfg["ssl_ca"], ssl_verify_cert=True)
@@ -238,6 +240,15 @@ def get_weather(city_id):
 
 # ---------- SQL playground ----------
 
+# Words that change data or files. Blocked in the playground because some
+# MySQL-compatible clouds (e.g. TiDB) don't enforce READ ONLY transactions.
+WRITE_WORDS = re.compile(
+    r"\b(insert|update|delete|replace|drop|alter|truncate|create|rename|grant|revoke|"
+    r"load|lock|unlock|call|handler|set|into)\b",
+    re.IGNORECASE,
+)
+
+
 def run_select(sql):
     """Run a read-only query typed by the user. Returns (columns, rows)."""
     sql = sql.strip().rstrip(";").strip()
@@ -245,12 +256,23 @@ def run_select(sql):
         raise ValueError("Only SELECT, WITH, SHOW and DESCRIBE queries are allowed here.")
     if ";" in sql:
         raise ValueError("Run one query at a time (only one ; at the end).")
+    word = WRITE_WORDS.search(sql)
+    if word:
+        raise ValueError(f"“{word.group(0).upper()}” changes data, so it isn't allowed here.")
+    if "password_hash" in sql.lower():
+        raise ValueError("Password hashes are private, so that column can't be queried.")
     conn = get_connection()
     try:
-        conn.start_transaction(readonly=True)  # MySQL itself blocks any write
+        conn.start_transaction(readonly=True)  # on real MySQL this also blocks writes
         cur = conn.cursor()
         cur.execute(sql)
-        return cur.column_names, cur.fetchall()
+        columns, rows = list(cur.column_names), cur.fetchall()
+        # SELECT * FROM users would still include the hash, so drop that column
+        hidden = [i for i, c in enumerate(columns) if c.lower() == "password_hash"]
+        for i in reversed(hidden):
+            del columns[i]
+            rows = [row[:i] + row[i + 1:] for row in rows]
+        return columns, rows
     finally:
         conn.rollback()  # make sure nothing is ever saved from this box
         conn.close()

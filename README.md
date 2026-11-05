@@ -7,6 +7,10 @@ One sign-in, two apps, built with **Streamlit + MySQL**:
 
 Each app has its own **SQL playground** with example queries you can edit and run.
 
+**✨ Nuera Core AI** (ai.criusbehera.com) is a built-in chatbot. Ask questions in plain English,
+like "Analyse the student marks" or "Which city had the most rain?". It writes up to 3 read-only SQL
+queries, runs them on your database, and explains the answer, showing the SQL, the table and a chart.
+
 Made by **Crius Behera** · Sponsored by **Nuera Core AI**, **Crius Software Solutions**
 
 ---
@@ -23,7 +27,8 @@ Made by **Crius Behera** · Sponsored by **Nuera Core AI**, **Crius Software Sol
    mysql -u root -p < schema.sql
    mysql -u root -p school_db < sample_data.sql
    ```
-3. Copy `.streamlit/secrets.example.toml` to `.streamlit/secrets.toml` and fill in your MySQL login.
+3. Copy `.streamlit/secrets.example.toml` to `.streamlit/secrets.toml` and fill in your MySQL login
+   and your Nuera Core AI access key.
 4. Install the packages and start the app:
    ```
    pip install -r requirements.txt
@@ -42,7 +47,8 @@ Made by **Crius Behera** · Sponsored by **Nuera Core AI**, **Crius Software Sol
 - **Auto sign-out** after 30 minutes with no activity.
 - Passwords are stored only as salted **PBKDF2-SHA256** hashes, and the hash never stays in the session.
 - Every query uses `%s` parameters, which protects against SQL injection.
-- The SQL playgrounds run inside a **read-only transaction**, one statement at a time.
+- The SQL playgrounds and the AI run **read-only**: one statement at a time, write keywords
+  (INSERT, UPDATE, DELETE, DROP, INTO, …) are blocked, and the `password_hash` column is never returned.
 
 ## Files
 
@@ -52,6 +58,8 @@ Made by **Crius Behera** · Sponsored by **Nuera Core AI**, **Crius Software Sol
 | `auth.py` | Sign in, create account, change password, password rules |
 | `student_board.py` | Student Board pages |
 | `weather_station.py` | Weather Station pages |
+| `ai.py` | Nuera Core AI chatbot: question → SQL → answer |
+| `load_db.py` | Loads the tables into a cloud database (for example TiDB) |
 | `ui.py` | Shared styles, banners, credits and the SQL playground |
 | `db.py` | All MySQL queries, password hashing and login lockout |
 | `weather.py` | Fetches weather from the free Open-Meteo API (no key needed) |

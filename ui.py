@@ -14,6 +14,7 @@ GRADIENTS = {
     "os": "linear-gradient(135deg, #0F172A 0%, #312E81 55%, #6366F1 100%)",
     "students": "linear-gradient(135deg, #6366F1 0%, #8B5CF6 55%, #EC4899 100%)",
     "weather": "linear-gradient(135deg, #0EA5E9 0%, #14B8A6 60%, #22C55E 100%)",
+    "ai": "linear-gradient(135deg, #7C3AED 0%, #C026D3 50%, #F97316 100%)",
 }
 
 CSS = """

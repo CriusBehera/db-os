@@ -8,6 +8,7 @@ from datetime import datetime
 import mysql.connector
 import streamlit as st
 
+import ai
 import auth
 import db
 import student_board
@@ -64,6 +65,18 @@ def os_home():
              PAGES["weather"])
 
     with st.container(border=True):
+        c1, c2 = st.columns([3, 1], vertical_alignment="center")
+        c1.markdown(f"<div style='display:flex;gap:1rem;align-items:center'>"
+                    f"<div class='tile-icon' style='background:{ui.GRADIENTS['ai']};margin:0'>✨</div>"
+                    "<div><b style='font-size:1.15rem'>Nuera Core AI</b><br>"
+                    "<span class='muted'>Ask questions in plain English. It writes the SQL, "
+                    "reads both apps' data and explains the answer.</span></div></div>",
+                    unsafe_allow_html=True)
+        if c2.button("Ask Nuera AI", type="primary", icon=":material/auto_awesome:",
+                     width="stretch"):
+            st.switch_page(PAGES["ai"])
+
+    with st.container(border=True):
         st.subheader("🖥️ System", anchor=False)
         total = sum(info[k] for k in ("users", "students", "cities", "weather"))
         items = [("Status", "🟢 Online"), ("MySQL", info["version"].split("-")[0]),
@@ -81,6 +94,8 @@ def build_pages():
         "": st.Page(os_home, title="Home", icon=":material/home:", default=True),
         "account": st.Page(auth.account_page, title="Account", icon=":material/person:",
                            url_path="account"),
+        "ai": st.Page(ai.assistant_page, title="Nuera AI", icon=":material/auto_awesome:",
+                      url_path="ai"),
     }
     for module in (student_board, weather_station):
         for func, title, icon, path in module.PAGES:
@@ -101,6 +116,7 @@ def sidebar(current_path):
         st.markdown("<div class='side-brand'>💠 The DB <span>OS</span></div>",
                     unsafe_allow_html=True)
         st.page_link(PAGES[""], label="Home")
+        st.page_link(PAGES["ai"], label="Ask Nuera AI")
         if app:
             name, paths, other, other_name = APPS[app]
             st.caption(name)
