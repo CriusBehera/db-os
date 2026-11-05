@@ -9,6 +9,8 @@ How one question is answered:
 """
 import json
 import re
+import time
+import traceback
 from datetime import date
 
 import mysql.connector
@@ -124,28 +126,62 @@ def run_queries(queries):
     return results
 
 
+class Trace:
+    """Step-by-step log of one answer, shown when Debug mode is on."""
+
+    def __init__(self):
+        self.start = time.time()
+        self.steps = []
+
+    def add(self, step, detail="", data=None):
+        self.steps.append({"t": time.time() - self.start, "step": step,
+                           "detail": detail, "data": data})
+
+
 def answer(question, messages):
-    """Answer one question. Returns {"answer", "results", "tokens"}."""
+    """Answer one question. Returns {"answer", "results", "tokens", "trace", "db_error"}."""
+    trace = Trace()
     history = history_text(messages)
     plan_args = dict(schema=SCHEMA, today=date.today().isoformat(), max_q=MAX_QUERIES,
                      history=history, question=question)
+    reply = {"results": [], "tokens": 0, "trace": trace.steps, "db_error": None}
 
-    text, tokens = ask_nuera(PLAN_PROMPT.format(extra="", **plan_args))
+    prompt = PLAN_PROMPT.format(extra="", **plan_args)
+    trace.add("1. Ask Nuera for a plan", f"prompt: {len(prompt):,} characters")
+    text, tokens = ask_nuera(prompt)
     plan = parse_json(text)
+    trace.add("Nuera replied", f"{tokens:,} tokens · parsed as JSON: {plan is not None}",
+              {"raw reply": text, "parsed plan": plan})
+    reply["tokens"] = tokens
     if not plan or not plan.get("queries"):
-        reply = plan.get("answer") if plan else None
-        return {"answer": reply or text, "results": [], "tokens": tokens}
+        trace.add("No queries needed", "answering directly")
+        return reply | {"answer": (plan or {}).get("answer") or text}
 
     results = run_queries(plan["queries"])
+    for r in results:
+        trace.add("2. Run SQL", r["error"] and f"❌ {r['error']}" or f"✅ {len(r['df'])} rows",
+                  {"sql": r["sql"]})
     failed = [r for r in results if r["error"]]
     if failed:  # give the AI one chance to fix its SQL
         errors = "\n".join(f"- {r['sql']}\n  error: {r['error']}" for r in failed)
         extra = f"\nYour previous queries failed. Fix them:\n{errors}\n"
+        trace.add("3. Ask Nuera to fix the failed queries", f"{len(failed)} failed")
         text, more = ask_nuera(PLAN_PROMPT.format(extra=extra, **plan_args))
-        tokens += more
+        reply["tokens"] += more
         fixed = parse_json(text)
+        trace.add("Nuera replied", f"{more:,} tokens", {"raw reply": text, "parsed plan": fixed})
         if fixed and fixed.get("queries"):
-            results = [r for r in results if not r["error"]] + run_queries(fixed["queries"])
+            retried = run_queries(fixed["queries"])
+            for r in retried:
+                trace.add("Run fixed SQL", r["error"] and f"❌ {r['error']}" or
+                          f"✅ {len(r['df'])} rows", {"sql": r["sql"]})
+            results = [r for r in results if not r["error"]] + retried
+    reply["results"] = results
+
+    if all(r["error"] for r in results):  # nothing worked: show the real database error
+        reply["db_error"] = results[-1]["error"]
+        trace.add("Stopped", "every query failed")
+        return reply | {"answer": "I couldn't read the database to answer that."}
 
     parts = []
     for n, r in enumerate(results, 1):
@@ -154,9 +190,12 @@ def answer(question, messages):
         else:
             csv = r["df"].head(MAX_ROWS_SENT).to_csv(index=False)
             parts.append(f"Query {n} ({len(r['df'])} rows): {r['sql']}\n{csv}")
-    text, more = ask_nuera(ANSWER_PROMPT.format(history=history, question=question,
-                                                results="\n\n".join(parts)))
-    return {"answer": text, "results": results, "tokens": tokens + more}
+    prompt = ANSWER_PROMPT.format(history=history, question=question, results="\n\n".join(parts))
+    trace.add("4. Ask Nuera to explain the results", f"prompt: {len(prompt):,} characters")
+    text, more = ask_nuera(prompt)
+    reply["tokens"] += more
+    trace.add("Done", f"{more:,} tokens · {reply['tokens']:,} total")
+    return reply | {"answer": text}
 
 
 # ---------- Chat page ----------
@@ -186,6 +225,47 @@ def show_results(results):
                 st.bar_chart(df, x=df.columns[0], y=numeric[0], height=240)
 
 
+def show_debug(trace):
+    with st.expander("🐞 Debug: step by step", expanded=False):
+        for s in trace:
+            st.markdown(f"`{s['t']:5.1f}s` **{s['step']}** {s['detail']}")
+            if s["data"]:
+                st.json(s["data"], expanded=False)
+
+
+def show_reply(m, debug):
+    st.markdown(m["content"])
+    if m.get("db_error"):
+        st.error(f"**Database error:** {m['db_error']}", icon=":material/database:")
+    show_results(m.get("results", []))
+    if debug and m.get("trace"):
+        show_debug(m["trace"])
+
+
+def system_check():
+    """Quick tests for the Debug panel: secrets, Nuera Core AI and the database."""
+    nuera = st.secrets.get("nuera", {})
+    mysql_cfg = st.secrets.get("mysql", {})
+    st.markdown(f"**Secrets** · `[nuera]` keys: `{sorted(nuera)}` · `[mysql]` keys: `{sorted(mysql_cfg)}`")
+    try:
+        t = time.time()
+        r = requests.post(nuera["url"], json={"email": nuera["email"], "platform":
+                          nuera.get("platform", "w"), "prompt": "%SUB-STATE%"}, timeout=60)
+        st.markdown(f"**Nuera Core AI** · HTTP {r.status_code} in {time.time() - t:.1f}s")
+        st.json(r.json(), expanded=False)
+    except Exception as e:  # show anything, this is a debug tool
+        st.error(f"Nuera Core AI: {type(e).__name__}: {e}")
+    for sql in ["SELECT COUNT(*) AS students FROM students",
+                "SELECT name, marks FROM students ORDER BY marks DESC LIMIT 1"]:
+        try:
+            t = time.time()
+            columns, rows = db.run_select(sql)
+            st.markdown(f"**Database** · ✅ `{sql}` → {dict(zip(columns, rows[0])) if rows else 'no rows'} "
+                        f"({time.time() - t:.1f}s)")
+        except Exception as e:
+            st.error(f"Database · `{sql}` → {type(e).__name__}: {getattr(e, 'msg', e)}")
+
+
 def assistant_page():
     ui.hero("Nuera Core AI", "Ask questions about your students and weather. "
             "It writes the SQL, runs it on your database and explains the answer.",
@@ -193,6 +273,13 @@ def assistant_page():
     if "nuera" not in st.secrets:
         st.warning("Add a `[nuera]` section to `.streamlit/secrets.toml` to turn on the assistant.")
         return
+
+    debug = st.toggle("🐞 Debug mode", key="ai_debug",
+                      help="Show each step: Nuera's raw replies, the SQL, errors and timings.")
+    if debug:
+        with st.expander("🩺 System check", expanded=True):
+            if st.button("Run checks", icon=":material/play_arrow:"):
+                system_check()
 
     messages = st.session_state.setdefault("ai_messages", [])
     question = st.chat_input("Ask about students, marks, cities or weather…")
@@ -206,8 +293,7 @@ def assistant_page():
 
     for m in messages:
         with st.chat_message(m["role"], avatar="🧑‍🎓" if m["role"] == "user" else "✨"):
-            st.markdown(m["content"])
-            show_results(m.get("results", []))
+            show_reply(m, debug) if m["role"] == "assistant" else st.markdown(m["content"])
 
     if question:
         with st.chat_message("user", avatar="🧑‍🎓"):
@@ -221,10 +307,15 @@ def assistant_page():
             except AIError as e:
                 st.error(str(e))
                 return
-            st.markdown(reply["answer"])
-            show_results(reply["results"])
-        messages += [{"role": "user", "content": question},
-                     {"role": "assistant", "content": reply["answer"], "results": reply["results"]}]
+            except Exception as e:  # anything unexpected: say what, and show details in Debug mode
+                st.error(f"Something went wrong: {type(e).__name__}: {e}")
+                if debug:
+                    st.code(traceback.format_exc())
+                return
+            message = {"role": "assistant", "content": reply["answer"], "results": reply["results"],
+                       "trace": reply["trace"], "db_error": reply["db_error"]}
+            show_reply(message, debug)
+        messages += [{"role": "user", "content": question}, message]
 
     if messages:
         c1, c2 = st.columns([4, 1])

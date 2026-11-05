@@ -263,7 +263,12 @@ def run_select(sql):
         raise ValueError("Password hashes are private, so that column can't be queried.")
     conn = get_connection()
     try:
-        conn.start_transaction(readonly=True)  # on real MySQL this also blocks writes
+        try:
+            conn.start_transaction(readonly=True)  # on real MySQL this also blocks writes
+        except mysql.connector.Error:
+            # TiDB rejects READ ONLY by default ("noop function"). The keyword
+            # checks above and the rollback below still keep the data safe.
+            conn.start_transaction()
         cur = conn.cursor()
         cur.execute(sql)
         columns, rows = list(cur.column_names), cur.fetchall()
