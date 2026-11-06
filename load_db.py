@@ -4,6 +4,7 @@ Use this instead of the `mysql` command line tool (newer versions of it can't
 log in to TiDB Cloud). It asks for the password, so it never appears in a file.
 
     python3 load_db.py --host HOST --user USER [--port 4000]
+    python3 load_db.py --host HOST --user USER --file migrate_auth.sql   (one file only)
 """
 import argparse
 import getpass
@@ -26,6 +27,7 @@ def main():
     parser.add_argument("--host", required=True)
     parser.add_argument("--user", required=True)
     parser.add_argument("--port", type=int, default=4000)
+    parser.add_argument("--file", help="run only this .sql file")
     args = parser.parse_args()
 
     options = dict(host=args.host, port=args.port, user=args.user,
@@ -35,7 +37,7 @@ def main():
 
     conn = mysql.connector.connect(**options)
     cur = conn.cursor()
-    for name in FILES:
+    for name in [args.file] if args.file else FILES:
         stmts = statements(name)
         for sql in stmts:
             cur.execute(sql.rstrip(";"))

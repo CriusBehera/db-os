@@ -1,4 +1,4 @@
-"""Sign in, create account and change password, with strict password rules."""
+"""Sign in (username, email or Google), create account, account page, password rules."""
 import re
 
 import streamlit as st
@@ -12,6 +12,7 @@ COMMON_PARTS = (
     "welcome", "letmein", "iloveyou", "football", "monkey", "sunshine", "princess", "dragon",
 )
 USERNAME_RULE = re.compile(r"^[A-Za-z0-9_]{3,20}$")
+EMAIL_RULE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def password_checks(password, username=""):
@@ -58,23 +59,69 @@ def new_password_inputs(username, key):
     return password if password and all(ok for ok, _ in checks) else None
 
 
+AUTH_PANEL = f"""
+<div class='auth-panel'>
+  <div>
+    <div class='sb-brand' style='padding:0'><div class='sb-logo'>DB</div>
+      <div><b>The DB OS</b><small>v2 · Streamlit + MySQL</small></div></div>
+    <h1>Your school data,<br><span>one place.</span></h1>
+    <p class='lead'>One sign-in, two apps, and an AI that can read and explain your database.</p>
+    <div class='feature'><div class='fi'>🎓</div><div><b>Student Board</b>
+      <small>Records, grades, class statistics and charts</small></div></div>
+    <div class='feature'><div class='fi'>🌦️</div><div><b>Weather Station</b>
+      <small>Live weather for cities worldwide, stored in MySQL</small></div></div>
+    <div class='feature'><div class='fi'>✨</div><div><b>Nuera Core AI</b>
+      <small>Ask questions in plain English, get answers from your data</small></div></div>
+  </div>
+  <div class='auth-foot'>{ui.CREDITS}</div>
+</div>
+"""
+
+
+def google_ready():
+    """True when [auth] with a Google client is present in secrets."""
+    try:
+        return bool(st.secrets["auth"]["client_id"])
+    except (KeyError, FileNotFoundError):
+        return False
+
+
+def google_identity():
+    """The verified Google profile of this browser, or None if not signed in with Google."""
+    try:
+        if st.user.is_logged_in and st.user.get("email") and st.user.get("email_verified", True):
+            return st.user
+    except Exception:  # no [auth] configured
+        pass
+    return None
+
+
 def sign_in_page():
-    _, mid, _ = st.columns([1, 1.35, 1])
-    with mid:
-        st.markdown(
-            "<div class='brand'><div class='logo'>DB</div><h1>The DB OS</h1>"
-            "<p>Student Board &nbsp;·&nbsp; Weather Station</p></div>",
-            unsafe_allow_html=True,
-        )
-        with st.container(border=True):
+    left, gap, right = st.columns([1.1, 0.12, 1])
+    left.markdown(AUTH_PANEL, unsafe_allow_html=True)
+    with right:
+        st.markdown("<div class='auth-head'><h2>Welcome 👋</h2>"
+                    "<p>Sign in with Google, your email or your username.</p></div>",
+                    unsafe_allow_html=True)
+        with ui.card("auth"):
+            if google_ready():
+                if st.button("Continue with Google", icon=":material/account_circle:",
+                             width="stretch", key="google_btn"):
+                    st.login()  # one provider in a flat [auth] section: no name needed
+            else:
+                st.button("Continue with Google", icon=":material/account_circle:",
+                          width="stretch", disabled=True, key="google_btn",
+                          help="Add an [auth] section to secrets.toml to turn this on.")
+            st.markdown("<div class='or'><span>or</span></div>", unsafe_allow_html=True)
+
             login_tab, register_tab = st.tabs(["Sign in", "Create account"])
 
             with login_tab:
                 with st.form("login", border=False):
-                    username = st.text_input("Username", placeholder="your username")
+                    who = st.text_input("Username or email", placeholder="you@example.com or username")
                     password = st.text_input("Password", type="password", placeholder="••••••••")
                     if st.form_submit_button("Sign in", type="primary", width="stretch"):
-                        user, error = db.authenticate(username.strip(), password)
+                        user, error = db.authenticate(who, password)
                         if user:
                             st.session_state.user = user
                             ui.flash(f"Welcome back, {user['username']}!", "👋")
@@ -89,34 +136,69 @@ def sign_in_page():
                                          placeholder="3–20 letters, numbers or _").strip()
                 if username and not USERNAME_RULE.match(username):
                     st.error("Usernames are 3–20 characters: letters, numbers and _ only.")
+                email = st.text_input("Email", key="reg_email", placeholder="you@example.com").strip()
+                if email and not EMAIL_RULE.match(email):
+                    st.error("That doesn't look like an email address.")
                 password = new_password_inputs(username, "reg")
-                ready = bool(password) and bool(USERNAME_RULE.match(username))
+                ready = (bool(password) and bool(USERNAME_RULE.match(username))
+                         and bool(EMAIL_RULE.match(email)))
                 if st.button("Create account", type="primary", width="stretch",
                              disabled=not ready):
-                    if db.create_user(username, password):
-                        st.success("Account created! Switch to **Sign in**.")
+                    error = db.create_user(username, email, password)
+                    if error:
+                        st.error(error)
                     else:
-                        st.error("That username is already taken.")
-        ui.credits()
+                        st.success("Account created! Switch to **Sign in**.")
 
 
 def account_page():
     user = st.session_state.user
-    ui.page_header("Account", "Your profile and password.")
+    ui.page_header("Account", "Your profile, sign-in methods and password.", "os", "👤")
     left, right = st.columns([1, 1.6])
-    with left, st.container(border=True):
-        st.subheader("👤 Profile", anchor=False)
-        st.markdown(f"**Username:** {user['username']}")
-        st.markdown(f"**Member since:** {user['created_at']:%d %B %Y}")
-    with right, st.container(border=True):
-        st.subheader("🔑 Change password", anchor=False)
-        current = st.text_input("Current password", type="password", key="cur_pw")
-        new = new_password_inputs(user["username"], "chg")
-        if st.button("Update password", type="primary", disabled=not (current and new)):
-            if db.change_password(user["id"], current, new):
-                for k in ("cur_pw", "chg_pw", "chg_confirm"):
-                    st.session_state.pop(k, None)
-                ui.flash("Password updated", "🔑")
-                st.rerun()
-            else:
-                st.error("Your current password is wrong.")
+    with left, ui.card():
+        st.subheader("Profile", anchor=False)
+        email = user.get("login_email")
+        st.markdown(f"<div class='profile'><div class='avatar'>{user['username'][0].upper()}</div>"
+                    f"<div><b>{user['username']}</b><small>{email or 'No email yet'}<br>Member since "
+                    f"{user['created_at']:%d %B %Y}</small></div></div>", unsafe_allow_html=True)
+        methods = [m for m, on in (("Password", user["has_password"]),
+                                   ("Google", bool(email) and google_ready())) if on]
+        ui.stats([("Sign in with", " + ".join(methods) or "—"), ("Lockout", f"{db.MAX_ATTEMPTS} tries")])
+
+    with right:
+        if not email:
+            with ui.card("add_email"):
+                st.subheader("Add your email", anchor=False)
+                st.caption("Lets you sign in with your email, and with Google using the same address.")
+                new_email = st.text_input("Email", key="add_email_box", placeholder="you@example.com")
+                if st.button("Save email", type="primary",
+                             disabled=not EMAIL_RULE.match(new_email.strip())):
+                    error = db.add_login_email(user["id"], new_email)
+                    if error:
+                        st.error(error)
+                    else:
+                        st.session_state.user = db.get_user("id", user["id"])
+                        ui.flash("Email saved", "📧")
+                        st.rerun()
+
+        with ui.card("password"):
+            has_password = user["has_password"]
+            st.subheader("Change password" if has_password else "Set a password", anchor=False)
+            if not has_password:
+                st.caption("You signed in with Google. Add a password to also sign in with your "
+                           "username or email.")
+            current = st.text_input("Current password", type="password", key="cur_pw") if has_password else None
+            new = new_password_inputs(user["username"], "chg")
+            ready = bool(new) and (bool(current) or not has_password)
+            if st.button("Update password" if has_password else "Set password", type="primary",
+                         disabled=not ready):
+                done = (db.change_password(user["id"], current, new) if has_password
+                        else db.set_first_password(user["id"], new))
+                if done:
+                    for k in ("cur_pw", "chg_pw", "chg_confirm"):
+                        st.session_state.pop(k, None)
+                    st.session_state.user = db.get_user("id", user["id"])
+                    ui.flash("Password saved", "🔑")
+                    st.rerun()
+                else:
+                    st.error("Your current password is wrong.")

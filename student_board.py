@@ -55,26 +55,26 @@ def home():
             "students", tag="App 1")
     df = students_df()
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Students", len(df), border=True)
-    m2.metric("Average marks", f"{df['marks'].mean():.1f}" if len(df) else "—", border=True)
+    m1.metric("Students", len(df))
+    m2.metric("Average marks", f"{df['marks'].mean():.1f}" if len(df) else "—")
     if len(df):
         top = df.loc[df["marks"].idxmax()]
         m3.metric("Top scorer", top["name"], f"{top['marks']:.0f} marks", delta_color="off",
-                  delta_arrow="off", border=True)
-        m4.metric("Pass rate", f"{(df['marks'] >= 50).mean():.0%}", border=True)
+                  delta_arrow="off")
+        m4.metric("Pass rate", f"{(df['marks'] >= 50).mean():.0%}")
     else:
-        m3.metric("Top scorer", "—", border=True)
-        m4.metric("Pass rate", "—", border=True)
+        m3.metric("Top scorer", "—")
+        m4.metric("Pass rate", "—")
 
     if df.empty:
         st.info("No students yet. Add one from **Add student**.")
         return
     left, right = st.columns([1.1, 1])
-    with left, st.container(border=True):
+    with left, ui.card():
         st.subheader("🏆 Top 5 students", anchor=False)
         st.dataframe(df.nlargest(5, "marks")[["name", "class_name", "marks", "grade"]],
                      column_config=STUDENT_COLUMNS, hide_index=True, width="stretch")
-    with right, st.container(border=True):
+    with right, ui.card():
         st.subheader("📊 Average by class", anchor=False)
         st.altair_chart(class_avg_chart(df).properties(height=200), width="stretch")
 
@@ -99,13 +99,13 @@ def student_form(key, student=None):
 
 
 def all_students():
-    ui.page_header("All students", "Search, filter and export every student record.")
+    ui.page_header("All students", "Search, filter and export every student record.", "students", "👥")
     df = students_df()
     if df.empty:
         st.info("No students yet. Add one from **Add student**.")
         return
 
-    with st.container(border=True):
+    with ui.card():
         c1, c2 = st.columns([1, 1.4])
         search = c1.text_input("Search", placeholder="🔍  Name, roll no or email",
                                label_visibility="collapsed")
@@ -127,8 +127,8 @@ def all_students():
 
 
 def add_student():
-    ui.page_header("Add student", "Create a new student record.")
-    with st.container(border=True):
+    ui.page_header("Add student", "Create a new student record.", "students", "➕")
+    with ui.card():
         values = student_form("add")
     if values:
         try:
@@ -151,7 +151,7 @@ def confirm_delete(student):
 
 
 def edit_student():
-    ui.page_header("Edit student", "Update marks and details, or remove a record.")
+    ui.page_header("Edit student", "Update marks and details, or remove a record.", "students", "✏️")
     students = db.get_students()
     if not students:
         st.info("No students yet.")
@@ -159,7 +159,7 @@ def edit_student():
     labels = {f"{s['roll_no']} — {s['name']} ({s['class_name']})": s for s in students}
     student = labels[st.selectbox("Student", labels)]
 
-    with st.container(border=True):
+    with ui.card():
         values = student_form(f"edit_{student['id']}", student)
     if values:
         try:
@@ -174,7 +174,7 @@ def edit_student():
 
 
 def statistics():
-    ui.page_header("Statistics", "How each class is doing, calculated live with SQL.")
+    ui.page_header("Statistics", "How each class is doing, calculated live with SQL.", "students", "📊")
     stats = db.class_stats()
     if not stats:
         st.info("Add some students first.")
@@ -183,16 +183,16 @@ def statistics():
     df = students_df()
 
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Students", len(df), border=True)
-    m2.metric("Classes", len(stats_df), border=True)
-    m3.metric("School average", f"{df['marks'].mean():.1f}", border=True)
-    m4.metric("Pass rate", f"{(df['marks'] >= 50).mean():.0%}", border=True)
+    m1.metric("Students", len(df))
+    m2.metric("Classes", len(stats_df))
+    m3.metric("School average", f"{df['marks'].mean():.1f}")
+    m4.metric("Pass rate", f"{(df['marks'] >= 50).mean():.0%}")
 
     left, right = st.columns([1.4, 1])
-    with left, st.container(border=True):
+    with left, ui.card():
         st.subheader("Average by class", anchor=False)
         st.altair_chart(class_avg_chart(df), width="stretch")
-    with right, st.container(border=True):
+    with right, ui.card():
         st.subheader("Grades", anchor=False)
         counts = df["grade"].value_counts().reindex(GRADES, fill_value=0).reset_index()
         donut = alt.Chart(counts).mark_arc(innerRadius=70, cornerRadius=6, padAngle=0.02).encode(
@@ -203,7 +203,7 @@ def statistics():
         ).properties(height=300)
         st.altair_chart(donut, width="stretch")
 
-    with st.container(border=True):
+    with ui.card():
         st.subheader("Marks distribution", anchor=False)
         hist = alt.Chart(df).mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
             x=alt.X("marks:Q", bin=alt.Bin(step=10, extent=[0, 100]), title="Marks"),
@@ -212,7 +212,7 @@ def statistics():
         ).properties(height=220)
         st.altair_chart(hist, width="stretch")
 
-    with st.container(border=True):
+    with ui.card():
         st.subheader("Class summary", anchor=False)
         st.dataframe(
             stats_df,
@@ -228,7 +228,7 @@ def statistics():
 
 
 def sql():
-    ui.page_header("Student SQL", "Practise SQL on the students and users tables.")
+    ui.page_header("SQL playground", "Practise SQL on the students and users tables.", "students", "🧮")
     ui.sql_playground(
         [e for e in EXAMPLES if e["app"] == "students"],
         "**students** — id, name, roll_no, class_name, email, marks, added_by, created_at\n\n"

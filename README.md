@@ -1,6 +1,6 @@
 # 💠 The DB OS
 
-One sign-in, two apps, built with **Streamlit + MySQL**:
+One sign-in (username, email or **Google**), two apps, built with **Streamlit + MySQL**:
 
 - **🎓 Student Board**: student records, marks, grades, class statistics and charts.
 - **🌦️ Weather Station**: real daily weather for any city (from Open-Meteo), stored in MySQL.
@@ -43,6 +43,8 @@ Made by **Crius Behera** · Sponsored by **Nuera Core AI**, **Crius Software Sol
 - **Strong passwords only**: at least 8 characters, with an uppercase letter, a lowercase letter,
   a number and a symbol. No spaces, not containing your username, and no common words like
   "password" or "123456". A live checklist and strength bar show what's missing.
+- **Three ways to sign in**, one account: username + password, email + password, or Google
+  (linked by the verified email). Sign-in emails are private, never shown in the SQL playgrounds or to the AI.
 - **Account lockout**: 5 wrong passwords in a row lock the account for 5 minutes.
 - **Auto sign-out** after 30 minutes with no activity.
 - Passwords are stored only as salted **PBKDF2-SHA256** hashes, and the hash never stays in the session.
@@ -59,6 +61,7 @@ Made by **Crius Behera** · Sponsored by **Nuera Core AI**, **Crius Software Sol
 | `student_board.py` | Student Board pages |
 | `weather_station.py` | Weather Station pages |
 | `ai.py` | Nuera Core AI chatbot: question → SQL → answer |
+| `migrate_auth.sql` | Adds email + Google columns to an existing `users` table |
 | `load_db.py` | Loads the tables into a cloud database (for example TiDB) |
 | `ui.py` | Shared styles, banners, credits and the SQL playground |
 | `db.py` | All MySQL queries, password hashing and login lockout |

@@ -95,3 +95,76 @@ To change the database login, open your app's menu (⋮) → **Settings → Secr
 > **Other hosts.** Any MySQL host works the same way. For a host with its own
 > certificate (for example Aiven), download its `ca.pem` into this folder,
 > commit it, and set `ssl_ca = "ca.pem"`.
+
+---
+
+# Google sign-in
+
+People can sign in three ways, all tied to one account in the `users` table:
+**username + password**, **email + password**, or **Continue with Google**.
+Google and email accounts are linked by the (Google-verified) email address.
+
+## 1. Add the new columns to your database (once)
+
+Local MySQL:
+
+```bash
+mysql -u root school_db < migrate_auth.sql
+```
+
+TiDB (online):
+
+```bash
+python3 load_db.py --host YOUR_HOST --user YOUR_USER --file migrate_auth.sql
+```
+
+(New databases get these columns from `schema.sql` already.)
+
+## 2. Create the Google keys (free, about 10 minutes)
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) and create a project, e.g. `db-os`.
+2. **APIs & Services → OAuth consent screen**: App name `The DB OS`, your email, Audience **External**.
+   Scopes: `openid`, `email`, `profile` (the basic ones, no Google review needed).
+3. **APIs & Services → Credentials → Create credentials → OAuth client ID**, type **Web application**.
+   Under **Authorized redirect URIs** add both:
+   - `http://localhost:8501/oauth2callback` (testing on your Mac)
+   - `https://YOUR-APP.streamlit.app/oauth2callback` (the live site)
+4. Copy the **Client ID** and **Client secret**.
+5. On the consent screen click **Publish app**, so anyone with a Google account can sign in.
+   (Until then only accounts you list as *test users* can.)
+
+## 3. Add the keys to your secrets
+
+In `.streamlit/secrets.toml` (your Mac) and in Streamlit Cloud → **⋮ → Settings → Secrets** (online),
+add this section. Online, set `redirect_uri` to your app's real address.
+
+```toml
+[auth]
+redirect_uri = "http://localhost:8501/oauth2callback"
+cookie_secret = "PASTE-A-LONG-RANDOM-TEXT"
+client_id = "xxxx.apps.googleusercontent.com"
+client_secret = "GOCSPX-xxxx"
+server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
+```
+
+Make the `cookie_secret` with:
+
+```bash
+python3 -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Restart the app. The **Continue with Google** button is now active.
+
+## Good to know
+
+- Passwords are never stored for Google-only accounts. Their Account page lets them **set a password** later.
+- Older accounts without an email can **add one** on the Account page; after that, Google with the same email lands in the same account.
+- The strict password rules and lockout apply to password sign-ins. Google handles its own security.
+- Sign-in emails are private: the SQL playgrounds and the AI can't read them.
+
+| Problem | Fix |
+|---|---|
+| `redirect_uri_mismatch` from Google | The address in Secrets must match one of the redirect URIs in Google exactly |
+| "Access blocked: app not verified" | Click **Publish app** on the consent screen, or add yourself as a test user |
+| Button is greyed out | The `[auth]` section is missing from Secrets, or the app wasn't restarted |
+| `ModuleNotFoundError: authlib` | `Authlib` must be in `requirements.txt` (it is) |

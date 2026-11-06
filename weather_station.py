@@ -35,15 +35,15 @@ def home():
     hottest = latest.loc[latest["temp_max"].idxmax()]
 
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("📍 Cities", len(cities), border=True)
-    m2.metric("📅 Days stored", f"{len(df):,}", border=True)
+    m1.metric("📍 Cities", len(cities))
+    m2.metric("📅 Days stored", f"{len(df):,}")
     m3.metric("🔥 Hottest today", hottest["city"], f"{hottest['temp_max']:.1f} °C",
-              delta_color="off", delta_arrow="off", border=True)
+              delta_color="off", delta_arrow="off")
     m4.metric("💧 Wettest (30 days)", totals.idxmax(), f"{totals.max():.0f} mm",
-              delta_color="off", delta_arrow="off", border=True)
+              delta_color="off", delta_arrow="off")
 
     left, right = st.columns([1, 1.25])
-    with left, st.container(border=True):
+    with left, ui.card():
         top = st.columns([1.2, 1], vertical_alignment="center")
         top[0].subheader("🌍 Today", anchor=False)
         if top[1].button("Refresh all", icon=":material/refresh:", width="stretch"):
@@ -52,6 +52,7 @@ def home():
         st.dataframe(
             latest[[" ", "city", "temp_max", "temp_min", "rainfall_mm"]],
             column_config={
+                " ": st.column_config.TextColumn(" ", width=36),
                 "city": "City",
                 "temp_max": st.column_config.NumberColumn("High", format="%.1f °C"),
                 "temp_min": st.column_config.NumberColumn("Low", format="%.1f °C"),
@@ -59,7 +60,7 @@ def home():
             },
             hide_index=True, width="stretch",
         )
-    with right, st.container(border=True):
+    with right, ui.card():
         st.subheader("🌡️ Average high by city", anchor=False)
         avg = df.groupby("city", as_index=False)["temp_max"].mean()
         bars = alt.Chart(avg).mark_bar(cornerRadiusTopRight=6, cornerRadiusBottomRight=6).encode(
@@ -72,7 +73,7 @@ def home():
             text=alt.Text("temp_max:Q", format=".1f"))
         st.altair_chart((bars + labels).properties(height=300), width="stretch")
 
-    with st.container(border=True):
+    with ui.card():
         st.subheader("📈 Daily highs, all cities", anchor=False)
         picked = st.pills("Cities", sorted(df["city"].unique()), selection_mode="multi",
                           default=sorted(df["city"].unique()), label_visibility="collapsed")
@@ -101,7 +102,7 @@ def refresh_all(cities):
 
 
 def city_weather():
-    ui.page_header("City weather", "Daily highs, lows, rain and wind for one city.")
+    ui.page_header("City weather", "Daily highs, lows, rain and wind for one city.", "weather", "🌤️")
     cities = db.get_cities()
 
     c1, c2, c3 = st.columns([2.2, 1, 1], vertical_alignment="bottom")
@@ -151,19 +152,16 @@ def city_weather():
     change = latest["temp_max"] - df.iloc[-2]["temp_max"] if len(df) > 1 else None
     m1.metric(f"{weather_icon(latest)} Today's high", f"{latest['temp_max']:.1f} °C",
               f"{change:+.1f}° vs yesterday" if change is not None else None,
-              delta_color="off", chart_data=df["temp_max"].tolist(), chart_type="area",
-              border=True)
+              delta_color="off", chart_data=df["temp_max"].tolist(), chart_type="area")
     m2.metric("🌙 Today's low", f"{latest['temp_min']:.1f} °C",
-              chart_data=df["temp_min"].tolist(), chart_type="area", border=True)
+              chart_data=df["temp_min"].tolist(), chart_type="area")
     m3.metric(f"💧 Rain, {len(df)} days", f"{df['rainfall_mm'].sum():.0f} mm",
               f"{(df['rainfall_mm'] > 0).sum()} rainy days", delta_color="off",
-              delta_arrow="off", chart_data=df["rainfall_mm"].tolist(), chart_type="bar",
-              border=True)
+              delta_arrow="off", chart_data=df["rainfall_mm"].tolist(), chart_type="bar")
     m4.metric("🔥 Hottest day", f"{hottest['temp_max']:.1f} °C",
-              f"on {hottest['date']:%d %b}", delta_color="off", delta_arrow="off",
-              border=True)
+              f"on {hottest['date']:%d %b}", delta_color="off", delta_arrow="off")
 
-    with st.container(border=True):
+    with ui.card():
         st.subheader("Temperature", anchor=False)
         base = alt.Chart(df).encode(x=alt.X("date:T", title=None))
         band = base.mark_area(opacity=0.18, color="#14B8A6").encode(
@@ -179,7 +177,7 @@ def city_weather():
                     unsafe_allow_html=True)
 
     left, right = st.columns(2)
-    with left, st.container(border=True):
+    with left, ui.card():
         st.subheader("Rainfall", anchor=False)
         rain = alt.Chart(df).mark_bar(color="#3B82F6", cornerRadiusTopLeft=3,
                                       cornerRadiusTopRight=3).encode(
@@ -187,7 +185,7 @@ def city_weather():
             tooltip=[alt.Tooltip("date:T", format="%d %b"), alt.Tooltip("rainfall_mm", title="mm")],
         ).properties(height=240)
         st.altair_chart(rain, width="stretch")
-    with right, st.container(border=True):
+    with right, ui.card():
         st.subheader("Wind", anchor=False)
         wind = alt.Chart(df).mark_area(
             line={"color": "#14B8A6"}, color="#14B8A6", opacity=0.3, interpolate="monotone"
@@ -217,7 +215,7 @@ def confirm_remove_city(city):
 
 
 def sql():
-    ui.page_header("Weather SQL", "Practise SQL on the cities and weather tables.")
+    ui.page_header("SQL playground", "Practise SQL on the cities and weather tables.", "weather", "🧮")
     ui.sql_playground(
         [e for e in EXAMPLES if e["app"] == "weather"],
         "**cities** — id, name, country, latitude, longitude\n\n"

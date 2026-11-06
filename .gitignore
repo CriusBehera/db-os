@@ -1,4 +1,5 @@
-.streamlit/secrets.toml
+.streamlit/secrets.*
+!.streamlit/secrets.example.toml
 __pycache__/
 .claude/
 .DS_Store

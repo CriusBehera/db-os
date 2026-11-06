@@ -58,66 +58,121 @@ def check_password(password, stored):
 
 # ---------- Users ----------
 
-def create_user(username, password):
-    """Returns True on success, False if the username is taken."""
+PUBLIC_USER = "id, username, login_email, provider, created_at, password_hash IS NOT NULL AS has_password"
+
+
+def get_user(field, value):
+    """One user by id, username or login_email, without the password hash."""
+    assert field in ("id", "username", "login_email")
+    rows = run_query(f"SELECT {PUBLIC_USER} FROM users WHERE {field} = %s", (value,), fetch=True)
+    return rows[0] if rows else None
+
+
+def create_user(username, email, password):
+    """Create a username + email + password account. Returns None or an error message."""
+    email = email.strip().lower()
+    if get_user("username", username):
+        return "That username is already taken."
+    if get_user("login_email", email):
+        return "That email already has an account. Sign in, or use Continue with Google."
     try:
         run_query(
-            "INSERT INTO users (username, password_hash) VALUES (%s, %s)",
-            (username, hash_password(password)),
+            "INSERT INTO users (username, login_email, password_hash) VALUES (%s, %s, %s)",
+            (username, email, hash_password(password)),
         )
-        return True
-    except mysql.connector.IntegrityError:
-        return False
+        return None
+    except mysql.connector.IntegrityError:  # someone took it a moment ago
+        return "That username or email is already taken."
 
 
-def authenticate(username, password):
-    """Check a login. Returns (user, None) on success or (None, error message).
+def authenticate(identifier, password):
+    """Check a username-or-email + password login.
 
-    After MAX_ATTEMPTS wrong passwords in a row the account is locked for
+    Returns (user, None) on success or (None, error message). After
+    MAX_ATTEMPTS wrong passwords in a row the account is locked for
     LOCK_MINUTES, so nobody can keep guessing passwords.
     """
+    identifier = identifier.strip()
+    field = "login_email" if "@" in identifier else "username"
     rows = run_query(
-        "SELECT id, username, password_hash, failed_attempts, created_at, "
+        "SELECT id, password_hash, failed_attempts, "
         "TIMESTAMPDIFF(SECOND, NOW(), locked_until) AS locked_for "
-        "FROM users WHERE username = %s",
-        (username,),
+        f"FROM users WHERE {field} = %s",
+        (identifier.lower() if field == "login_email" else identifier,),
         fetch=True,
     )
     if not rows:
-        return None, "Wrong username or password."
-    user = rows[0]
+        return None, "Wrong username, email or password."
+    row = rows[0]
 
-    if user["locked_for"] and user["locked_for"] > 0:
-        minutes = -(-user["locked_for"] // 60)  # round up
+    if row["password_hash"] is None:
+        return None, "This account signs in with Google. Use “Continue with Google”."
+    if row["locked_for"] and row["locked_for"] > 0:
+        minutes = -(-row["locked_for"] // 60)  # round up
         return None, f"Too many wrong passwords. Account locked — try again in {minutes} min."
 
-    if not check_password(password, user["password_hash"]):
-        attempts = user["failed_attempts"] + 1
+    if not check_password(password, row["password_hash"]):
+        attempts = row["failed_attempts"] + 1
         if attempts >= MAX_ATTEMPTS:
             run_query(
                 "UPDATE users SET failed_attempts = 0, "
                 "locked_until = NOW() + INTERVAL %s MINUTE WHERE id = %s",
-                (LOCK_MINUTES, user["id"]),
+                (LOCK_MINUTES, row["id"]),
             )
             return None, f"Too many wrong passwords. Account locked for {LOCK_MINUTES} minutes."
-        run_query("UPDATE users SET failed_attempts = %s WHERE id = %s", (attempts, user["id"]))
+        run_query("UPDATE users SET failed_attempts = %s WHERE id = %s", (attempts, row["id"]))
         left = MAX_ATTEMPTS - attempts
-        return None, f"Wrong username or password. {left} attempt(s) left before lock."
+        return None, f"Wrong username, email or password. {left} attempt(s) left before lock."
 
     run_query("UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = %s",
-              (user["id"],))
-    user.pop("password_hash")  # never keep the hash in the session
-    user.pop("locked_for")
-    return user, None
+              (row["id"],))
+    return get_user("id", row["id"]), None
+
+
+def google_user(email, name=""):
+    """Find the account for a Google-verified email, or create one.
+
+    An existing username/password account with the same email is reused, so
+    both ways of signing in lead to the same account.
+    """
+    email = email.strip().lower()
+    user = get_user("login_email", email)
+    if user:
+        return user
+    base = re.sub(r"[^A-Za-z0-9_]", "", (name or email.split("@")[0]).replace(" ", "_"))[:16]
+    base = base if len(base) >= 3 else (base + "user")[:16]
+    username, n = base, 1
+    while get_user("username", username):
+        n += 1
+        username = f"{base}{n}"
+    run_query("INSERT INTO users (username, login_email, provider) VALUES (%s, %s, 'google')",
+              (username, email))
+    return get_user("login_email", email)
 
 
 def change_password(user_id, current, new):
     """Returns True if the current password was right and the new one is saved."""
     rows = run_query("SELECT password_hash FROM users WHERE id = %s", (user_id,), fetch=True)
-    if not rows or not check_password(current, rows[0]["password_hash"]):
+    if not rows or not rows[0]["password_hash"] or not check_password(current, rows[0]["password_hash"]):
         return False
     run_query("UPDATE users SET password_hash = %s WHERE id = %s", (hash_password(new), user_id))
     return True
+
+
+def set_first_password(user_id, new):
+    """Give a Google-only account a password (only if it has none yet)."""
+    return run_query("UPDATE users SET password_hash = %s WHERE id = %s AND password_hash IS NULL",
+                     (hash_password(new), user_id)) == 1
+
+
+def add_login_email(user_id, email):
+    """Attach an email to an older account that has none. Returns None or an error message."""
+    email = email.strip().lower()
+    if get_user("login_email", email):
+        return "That email is already used by another account."
+    run_query("UPDATE users SET login_email = %s WHERE id = %s AND login_email IS NULL",
+              (email, user_id))
+    return None
 
 
 def system_info():
@@ -259,8 +314,8 @@ def run_select(sql):
     word = WRITE_WORDS.search(sql)
     if word:
         raise ValueError(f"“{word.group(0).upper()}” changes data, so it isn't allowed here.")
-    if "password_hash" in sql.lower():
-        raise ValueError("Password hashes are private, so that column can't be queried.")
+    if "password_hash" in sql.lower() or "login_email" in sql.lower():
+        raise ValueError("Password hashes and sign-in emails are private, so they can't be queried.")
     conn = get_connection()
     try:
         try:
@@ -272,8 +327,8 @@ def run_select(sql):
         cur = conn.cursor()
         cur.execute(sql)
         columns, rows = list(cur.column_names), cur.fetchall()
-        # SELECT * FROM users would still include the hash, so drop that column
-        hidden = [i for i, c in enumerate(columns) if c.lower() == "password_hash"]
+        # SELECT * FROM users would still include those columns, so drop them
+        hidden = [i for i, c in enumerate(columns) if c.lower() in ("password_hash", "login_email")]
         for i in reversed(hidden):
             del columns[i]
             rows = [row[:i] + row[i + 1:] for row in rows]

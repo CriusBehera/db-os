@@ -26,7 +26,7 @@ MAX_ROWS_SENT = 50  # rows per query sent to the AI (it sees a sample, you see e
 
 SCHEMA = """
 students(id, name, roll_no, class_name, email, marks DECIMAL 0-100, added_by -> users.id, created_at)
-users(id, username, created_at)            -- never select password_hash
+users(id, username, provider, created_at)  -- never select password_hash or login_email
 cities(id, name, country, latitude, longitude)
 weather(id, city_id -> cities.id, date, temp_max °C, temp_min °C, rainfall_mm, wind_kmh)
                                             -- one row per city per day, about the last 30 days
@@ -47,7 +47,7 @@ Reply with ONLY a JSON object, no code fences, in one of these two shapes:
 
 Rules for queries:
 - MySQL syntax, read-only: SELECT or WITH only, one statement each, no semicolons.
-- Never use INSERT, UPDATE, DELETE, SET, INTO, or the password_hash column.
+- Never use INSERT, UPDATE, DELETE, SET, INTO, or the password_hash / login_email columns.
 - Add ORDER BY and LIMIT 50 (or less) to queries that return many rows.
 - Round averages with ROUND(x, 1). Join cities to show city names, not ids.
 - For "analyse" or "summary" questions, use up to {max_q} queries that cover different angles.
