@@ -45,6 +45,7 @@ Made by **Crius Behera** · Sponsored by **Nuera Core AI**, **Crius Software Sol
   "password" or "123456". A live checklist and strength bar show what's missing.
 - **Three ways to sign in**, one account: username + password, email + password, or Google
   (linked by the verified email). Sign-in emails are private, never shown in the SQL playgrounds or to the AI.
+- **Email verification** through Firebase: a link is emailed at signup and sign-in is blocked until it's clicked (Google sign-ins skip it).
 - **Account lockout**: 5 wrong passwords in a row lock the account for 5 minutes.
 - **Auto sign-out** after 30 minutes with no activity.
 - Passwords are stored only as salted **PBKDF2-SHA256** hashes, and the hash never stays in the session.
@@ -57,6 +58,7 @@ Made by **Crius Behera** · Sponsored by **Nuera Core AI**, **Crius Software Sol
 | File | What it does |
 |------|--------------|
 | `app.py` | The DB OS shell: sign-in check, home screen, sidebar, app switching |
+| `firebase.py` | Emails the verification link and checks it (Firebase Auth REST API) |
 | `auth.py` | Sign in, create account, change password, password rules |
 | `student_board.py` | Student Board pages |
 | `weather_station.py` | Weather Station pages |

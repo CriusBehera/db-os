@@ -4,6 +4,7 @@ import re
 import streamlit as st
 
 import db
+import firebase
 import ui
 
 # Passwords containing any of these are among the first an attacker would try
@@ -96,6 +97,67 @@ def google_identity():
     return None
 
 
+def mask(email):
+    name, _, domain = email.partition("@")
+    return f"{name[:1]}{'*' * max(len(name) - 1, 2)}@{domain}"
+
+
+def login_body():
+    """Password check first, then the email must be verified (link from Firebase)."""
+    state = st.session_state
+    pending = state.get("pending")  # {"user": ..., "password": ...} after the password was right
+    if not pending:
+        with st.form("login", border=False):
+            who = st.text_input("Username or email", placeholder="you@example.com or username")
+            password = st.text_input("Password", type="password", placeholder="••••••••")
+            if st.form_submit_button("Sign in", type="primary", width="stretch"):
+                user, error = db.authenticate(who, password)
+                if not user:
+                    st.error(error)
+                elif not firebase.ready():
+                    st.error("Email verification isn't set up yet (add [firebase] to the secrets).")
+                else:
+                    state.pending = {"user": user, "password": password, "resend": True}
+                    st.rerun()
+        st.caption(f"🔒 {db.MAX_ATTEMPTS} wrong passwords lock the account for "
+                   f"{db.LOCK_MINUTES} minutes. Your email must be verified to sign in.")
+        return
+
+    user = pending["user"]
+    if not user["login_email"]:
+        st.warning("Your account needs a verified email. Add yours and we'll send a link.")
+        email = st.text_input("Email", key="pending_email", placeholder="you@example.com").strip()
+        if st.button("Send verification link", type="primary", width="stretch",
+                     disabled=not EMAIL_RULE.match(email)):
+            error = db.add_login_email(user["id"], email)
+            if error:
+                st.error(error)
+            else:
+                pending["user"] = db.get_user("id", user["id"])
+                st.rerun()
+    else:
+        status, error = firebase.check(user["login_email"], pending["password"], pending["resend"])
+        pending["resend"] = False
+        if status == "verified":
+            state.pop("pending", None)
+            state.user = db.get_user("id", user["id"])
+            ui.flash(f"Welcome back, {user['username']}!", "👋")
+            st.rerun()
+        elif status == "error":
+            st.error(firebase.explain(error))
+        else:
+            st.info(f"📧 Verify your email: we sent a link to **{mask(user['login_email'])}**. "
+                    "Click it (check spam too), then press the button below.")
+            if st.button("I've verified my email", type="primary", width="stretch"):
+                st.rerun()
+            if st.button("Resend link", width="stretch"):
+                pending["resend"] = True
+                st.rerun()
+    if st.button("Cancel", key="pending_cancel", width="stretch"):
+        state.pop("pending", None)
+        st.rerun()
+
+
 def sign_in_page():
     left, gap, right = st.columns([1.1, 0.12, 1])
     left.markdown(AUTH_PANEL, unsafe_allow_html=True)
@@ -117,19 +179,7 @@ def sign_in_page():
             login_tab, register_tab = st.tabs(["Sign in", "Create account"])
 
             with login_tab:
-                with st.form("login", border=False):
-                    who = st.text_input("Username or email", placeholder="you@example.com or username")
-                    password = st.text_input("Password", type="password", placeholder="••••••••")
-                    if st.form_submit_button("Sign in", type="primary", width="stretch"):
-                        user, error = db.authenticate(who, password)
-                        if user:
-                            st.session_state.user = user
-                            ui.flash(f"Welcome back, {user['username']}!", "👋")
-                            st.rerun()
-                        else:
-                            st.error(error)
-                st.caption(f"🔒 {db.MAX_ATTEMPTS} wrong passwords lock the account for "
-                           f"{db.LOCK_MINUTES} minutes.")
+                login_body()
 
             with register_tab:
                 username = st.text_input("Username", key="reg_user",
@@ -148,7 +198,10 @@ def sign_in_page():
                     if error:
                         st.error(error)
                     else:
-                        st.success("Account created! Switch to **Sign in**.")
+                        sent = firebase.ready() and not firebase.register(email.lower(), password)
+                        st.success("Account created! " + (
+                            "We emailed you a verification link. Click it, then switch to **Sign in**."
+                            if sent else "Switch to **Sign in**."))
 
 
 def account_page():
@@ -195,6 +248,8 @@ def account_page():
                 done = (db.change_password(user["id"], current, new) if has_password
                         else db.set_first_password(user["id"], new))
                 if done:
+                    if has_password and user["login_email"] and firebase.ready():
+                        firebase.change_password(user["login_email"], current, new)
                     for k in ("cur_pw", "chg_pw", "chg_confirm"):
                         st.session_state.pop(k, None)
                     st.session_state.user = db.get_user("id", user["id"])

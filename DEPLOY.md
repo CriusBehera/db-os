@@ -168,3 +168,30 @@ Restart the app. The **Continue with Google** button is now active.
 | "Access blocked: app not verified" | Click **Publish app** on the consent screen, or add yourself as a test user |
 | Button is greyed out | The `[auth]` section is missing from Secrets, or the app wasn't restarted |
 | `ModuleNotFoundError: authlib` | `Authlib` must be in `requirements.txt` (it is) |
+
+---
+
+# Email verification (Firebase Authentication)
+
+Username/email + password accounts must **verify their email**: signing up (or signing in for the
+first time) makes Firebase email a link, and sign-in is blocked until it's clicked. Firebase only
+sends the link and tracks "verified"; your users, passwords and lockout stay in MySQL.
+Google sign-ins skip it (Google already verified the address) and are untouched.
+
+## Set up (free, about 5 minutes)
+
+1. Go to [console.firebase.google.com](https://console.firebase.google.com) → **Add project** (name it `db-os`; Analytics off is fine).
+   You can pick your existing Google Cloud project `db-os-513907`.
+2. **Build → Authentication → Get started → Sign-in method → Email/Password → Enable** (leave "Email link" off) → Save.
+3. **Project settings (gear) → General → Web API Key**: copy it.
+4. Add it to `.streamlit/secrets.toml` and to Streamlit Cloud → Settings → Secrets:
+
+```toml
+[firebase]
+api_key = "AIza..."
+```
+
+5. Optional: **Authentication → Templates → Email address verification** lets you rename the sender and edit the text.
+
+Older accounts without an email are asked to add one at their next sign-in. Existing
+accounts are copied to Firebase automatically the first time they sign in.
