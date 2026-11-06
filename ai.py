@@ -26,7 +26,7 @@ MAX_ROWS_SENT = 50  # rows per query sent to the AI (it sees a sample, you see e
 
 SCHEMA = """
 students(id, name, roll_no, class_name, email, marks DECIMAL 0-100, added_by -> users.id, created_at)
-users(id, username, provider, created_at)  -- never select password_hash or login_email
+users(id, username, provider, created_at)  -- never select password_hash, login_email, totp_secret or backup_codes
 cities(id, name, country, latitude, longitude)
 weather(id, city_id -> cities.id, date, temp_max °C, temp_min °C, rainfall_mm, wind_kmh)
                                             -- one row per city per day, about the last 30 days

@@ -58,7 +58,8 @@ def check_password(password, stored):
 
 # ---------- Users ----------
 
-PUBLIC_USER = "id, username, login_email, provider, created_at, password_hash IS NOT NULL AS has_password"
+PUBLIC_USER = ("id, username, login_email, provider, created_at, "
+               "password_hash IS NOT NULL AS has_password, totp_secret IS NOT NULL AS has_totp")
 
 
 def get_user(field, value):
@@ -173,6 +174,30 @@ def add_login_email(user_id, email):
     run_query("UPDATE users SET login_email = %s WHERE id = %s AND login_email IS NULL",
               (email, user_id))
     return None
+
+
+def get_totp_secret(user_id):
+    rows = run_query("SELECT totp_secret FROM users WHERE id = %s", (user_id,), fetch=True)
+    return rows[0]["totp_secret"] if rows else None
+
+
+def save_totp(user_id, secret, backup_codes):
+    """Store the authenticator secret and the (hashed) one-time backup codes."""
+    hashed = ",".join(hashlib.sha256(c.encode()).hexdigest() for c in backup_codes)
+    run_query("UPDATE users SET totp_secret = %s, backup_codes = %s WHERE id = %s",
+              (secret, hashed, user_id))
+
+
+def use_backup_code(user_id, code):
+    """True (and the code is burnt) if `code` is an unused backup code."""
+    rows = run_query("SELECT backup_codes FROM users WHERE id = %s", (user_id,), fetch=True)
+    codes = (rows[0]["backup_codes"] or "").split(",") if rows else []
+    digest = hashlib.sha256(code.strip().lower().encode()).hexdigest()
+    if digest not in codes:
+        return False
+    codes.remove(digest)
+    run_query("UPDATE users SET backup_codes = %s WHERE id = %s", (",".join(codes), user_id))
+    return True
 
 
 def system_info():
@@ -314,7 +339,7 @@ def run_select(sql):
     word = WRITE_WORDS.search(sql)
     if word:
         raise ValueError(f"“{word.group(0).upper()}” changes data, so it isn't allowed here.")
-    if "password_hash" in sql.lower() or "login_email" in sql.lower():
+    if any(w in sql.lower() for w in ("password_hash", "login_email", "totp_secret", "backup_codes")):
         raise ValueError("Password hashes and sign-in emails are private, so they can't be queried.")
     conn = get_connection()
     try:
@@ -328,7 +353,7 @@ def run_select(sql):
         cur.execute(sql)
         columns, rows = list(cur.column_names), cur.fetchall()
         # SELECT * FROM users would still include those columns, so drop them
-        hidden = [i for i, c in enumerate(columns) if c.lower() in ("password_hash", "login_email")]
+        hidden = [i for i, c in enumerate(columns) if c.lower() in ("password_hash", "login_email", "totp_secret", "backup_codes")]
         for i in reversed(hidden):
             del columns[i]
             rows = [row[:i] + row[i + 1:] for row in rows]

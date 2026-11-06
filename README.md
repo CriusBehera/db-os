@@ -46,6 +46,7 @@ Made by **Crius Behera** · Sponsored by **Nuera Core AI**, **Crius Software Sol
 - **Three ways to sign in**, one account: username + password, email + password, or Google
   (linked by the verified email). Sign-in emails are private, never shown in the SQL playgrounds or to the AI.
 - **Email verification** through Firebase: a link is emailed at signup and sign-in is blocked until it's clicked (Google sign-ins skip it).
+- **Required two-step sign-in**: a 6-digit authenticator-app code (Microsoft Authenticator recommended) after the password and verified email, plus one-time backup codes.
 - **Account lockout**: 5 wrong passwords in a row lock the account for 5 minutes.
 - **Auto sign-out** after 30 minutes with no activity.
 - Passwords are stored only as salted **PBKDF2-SHA256** hashes, and the hash never stays in the session.

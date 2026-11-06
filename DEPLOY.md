@@ -195,3 +195,17 @@ api_key = "AIza..."
 
 Older accounts without an email are asked to add one at their next sign-in. Existing
 accounts are copied to Firebase automatically the first time they sign in.
+
+---
+
+# Two-step sign-in (authenticator app, required)
+
+After the password and the verified email, every password sign-in needs a 6-digit code from an
+authenticator app. We recommend **Microsoft Authenticator** (Google Authenticator and Authy work too).
+The first time, a QR code and 8 one-time backup codes are shown and the user must confirm a code
+before getting in. Google sign-ins skip it. Add the columns once:
+
+```bash
+mysql -u root school_db < migrate_totp.sql                                   # local (already done)
+python3 load_db.py --host YOUR_HOST --user YOUR_USER --file migrate_totp.sql # TiDB (online)
+```

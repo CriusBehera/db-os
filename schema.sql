@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS users (
     login_email   VARCHAR(255) NULL UNIQUE,   -- for email and Google sign-in (kept private)
     provider      VARCHAR(20) NOT NULL DEFAULT 'password',  -- 'password' or 'google'
     password_hash VARCHAR(255) NULL,          -- empty for Google-only accounts
+    totp_secret   VARCHAR(64) NULL,           -- authenticator app key (two-step sign-in)
+    backup_codes  TEXT NULL,                  -- hashed one-time backup codes
     failed_attempts INT NOT NULL DEFAULT 0,   -- wrong passwords in a row
     locked_until  DATETIME NULL,              -- set after too many wrong passwords
     created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP

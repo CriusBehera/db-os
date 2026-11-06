@@ -1,6 +1,9 @@
 """Sign in (username, email or Google), create account, account page, password rules."""
 import re
+import secrets
 
+import pyotp
+import segno
 import streamlit as st
 
 import db
@@ -97,6 +100,34 @@ def google_identity():
     return None
 
 
+def qr_image(secret, username):
+    uri = pyotp.TOTP(secret).provisioning_uri(name=username, issuer_name="The DB OS")
+    return segno.make(uri).svg_data_uri(scale=5, border=2)
+
+
+def totp_setup(user):
+    """Mandatory authenticator setup: QR code, backup codes, first-code check."""
+    state = st.session_state
+    if "totp_new" not in state:
+        state.totp_new = (pyotp.random_base32(), [secrets.token_hex(4) for _ in range(8)])
+    secret, backups = state.totp_new
+    st.markdown("**1.** Install **Microsoft Authenticator** (recommended; Google Authenticator and Authy "
+                "also work) and scan this code.")
+    st.markdown(f"<img src='{qr_image(secret, user['username'])}' width='170'>", unsafe_allow_html=True)
+    st.caption(f"Can't scan? Choose “enter code manually” and use this key: `{secret}`")
+    st.markdown("**2.** Save these one-time backup codes. Each works once if you lose your phone.")
+    st.code("  ".join(backups))
+    with st.form("totp_setup", border=False):
+        code = st.text_input("**3.** Enter the 6-digit code shown in the app", max_chars=6)
+        if st.form_submit_button("Turn on and continue", type="primary", width="stretch"):
+            if pyotp.TOTP(secret).verify(code.strip(), valid_window=1):
+                db.save_totp(user["id"], secret, backups)
+                state.pop("totp_new", None)
+                return True
+            st.error("That code is wrong. Check the app and try again.")
+    return False
+
+
 def mask(email):
     name, _, domain = email.partition("@")
     return f"{name[:1]}{'*' * max(len(name) - 1, 2)}@{domain}"
@@ -120,11 +151,38 @@ def login_body():
                     state.pending = {"user": user, "password": password, "resend": True}
                     st.rerun()
         st.caption(f"🔒 {db.MAX_ATTEMPTS} wrong passwords lock the account for "
-                   f"{db.LOCK_MINUTES} minutes. Your email must be verified to sign in.")
+                   f"{db.LOCK_MINUTES} minutes. Sign-in needs a verified email and an authenticator code.")
         return
 
     user = pending["user"]
-    if not user["login_email"]:
+    if pending.get("email_ok"):
+        def done():
+            state.pop("pending", None)
+            state.user = db.get_user("id", user["id"])
+            ui.flash(f"Welcome back, {user['username']}!", "👋")
+            st.rerun()
+
+        if not user["has_totp"]:
+            st.warning("Two-step sign-in is required. Set up your authenticator app to continue.")
+            if totp_setup(user):
+                done()
+        else:
+            st.info("🔐 Open your authenticator app and enter the 6-digit code for The DB OS.")
+            with st.form("totp", border=False):
+                code = st.text_input("Authenticator code", max_chars=8, placeholder="123456",
+                                     help="The 6-digit code, or an unused backup code.")
+                if st.form_submit_button("Verify", type="primary", width="stretch"):
+                    code = code.strip()
+                    secret = db.get_totp_secret(user["id"])
+                    if pyotp.TOTP(secret).verify(code, valid_window=1) or db.use_backup_code(user["id"], code):
+                        done()
+                    pending["tries"] = pending.get("tries", 0) + 1
+                    if pending["tries"] >= db.MAX_ATTEMPTS:
+                        state.pop("pending", None)
+                        ui.flash("Too many wrong codes. Sign in again.", "🔒")
+                        st.rerun()
+                    st.error(f"Wrong code. {db.MAX_ATTEMPTS - pending['tries']} attempt(s) left.")
+    elif not user["login_email"]:
         st.warning("Your account needs a verified email. Add yours and we'll send a link.")
         email = st.text_input("Email", key="pending_email", placeholder="you@example.com").strip()
         if st.button("Send verification link", type="primary", width="stretch",
@@ -139,9 +197,7 @@ def login_body():
         status, error = firebase.check(user["login_email"], pending["password"], pending["resend"])
         pending["resend"] = False
         if status == "verified":
-            state.pop("pending", None)
-            state.user = db.get_user("id", user["id"])
-            ui.flash(f"Welcome back, {user['username']}!", "👋")
+            pending["email_ok"] = True
             st.rerun()
         elif status == "error":
             st.error(firebase.explain(error))
@@ -233,6 +289,11 @@ def account_page():
                         st.session_state.user = db.get_user("id", user["id"])
                         ui.flash("Email saved", "📧")
                         st.rerun()
+
+        if user["has_password"]:
+            with ui.card("totp"):
+                st.subheader("Two-step sign-in", anchor=False)
+                st.success("On (required). Every password sign-in asks for a code from your authenticator app.")
 
         with ui.card("password"):
             has_password = user["has_password"]
